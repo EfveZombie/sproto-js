@@ -669,7 +669,7 @@ const sproto = (() => {
   function findTag(st: SprotoType, tag: number): SprotoField | null {
     if (st.base >= 0) {
       tag -= st.base;
-      if (tag < 0 || tag > st.n) {
+      if (tag < 0 || tag >= st.n) {
         return null;
       }
       return st.f![tag];
@@ -1947,7 +1947,7 @@ const sproto = (() => {
         if (headerbuffer === null) {
           throw new Error('Failed to encode header');
         }
-        if (session!==undefined) {
+        if (session !== undefined) {
           self.session[session] = proto.response ? proto.response : true;
         }
 
