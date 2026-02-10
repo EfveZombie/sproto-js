@@ -1,7 +1,7 @@
 // sproto.ts - TypeScript版本的sproto协议解析库
 
 // 类型定义
-export type SprotoValue = string | number | boolean | number[] | Record<string, unknown> | null;
+export type SprotoValue = string | number | boolean | number[] | Uint8Array | Record<string, unknown> | null;
 
 export interface SprotoUserData {
   deep?: number;
@@ -1498,7 +1498,7 @@ const sproto = (() => {
           {
             let arr: number[];
             if (args.extra) {
-              arr = target as number[];
+              arr = target instanceof Uint8Array ? Array.from(target) : target;
             } else {
               const str = target as string;
               arr = utils.string2utf8(str);
@@ -1704,7 +1704,7 @@ const sproto = (() => {
               arr.push(valueArray[i]);
             }
             if (args.extra) {
-              value = arr;
+              value = new Uint8Array(arr);
             } else {
               value = utils.utf82string(arr);
             }
