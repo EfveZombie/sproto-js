@@ -1,7 +1,7 @@
 // sproto.ts - TypeScript版本的sproto协议解析库
 
 // 类型定义
-export type SprotoValue = string | number | boolean | number[] | Uint8Array | Record<string, unknown> | null;
+export type SprotoValue = string | number | boolean | number[] | Uint8Array | Record<string, unknown> | Record<string | number, Record<string, unknown>> | null;
 
 export interface SprotoUserData {
   deep?: number;
@@ -14,6 +14,8 @@ export interface SprotoUserData {
   iter_index?: number;
   mainindex_tag?: number;
   key_index?: number;
+  map_keys?: string[] | null;
+  map_values?: unknown[] | null;
   [key: string]: unknown;
 }
 
@@ -70,6 +72,7 @@ export interface SprotoField {
   name: string | null;
   st: number | null;
   key: number;
+  map: number;
   extra: number;
 }
 
@@ -303,7 +306,7 @@ const sproto = (() => {
     let currentStream = stream.slice(header);
 
     for (let i = 0; i < fn; i++) {
-      const value = utils.toWord(field.slice(i * CONSTANTS.SIZEOF_FIELD + CONSTANTS.SIZEOF_HEADER));
+      const value = utils.toWord(field.slice(i * CONSTANTS.SIZEOF_FIELD));
 
       if (value !== 0) {
         continue;
@@ -340,6 +343,7 @@ const sproto = (() => {
     f.name = null;
     f.st = null;
     f.key = -1;
+    f.map = -1;
     f.extra = 0;
 
     sz = utils.toDword(stream);
@@ -401,6 +405,11 @@ const sproto = (() => {
           break;
         case 5:
           f.key = value;
+          break;
+        case 6: // map
+          if (value) {
+            f.map = 1;
+          }
           break;
         default:
           return null;
@@ -1451,8 +1460,21 @@ const sproto = (() => {
             self.array_index = 0;
             return CONSTANTS.SPROTO_CB_NOARRAY;
           }
+
+          // 判断是否为 map 类型（非数组的对象）
+          if (!Array.isArray(self.indata[args.tagname!])) {
+            self.map_keys = Object.keys(self.indata[args.tagname!] as Record<string, unknown>);
+            self.map_values = self.map_keys.map(k => (self.indata[args.tagname!] as Record<string, unknown>)[k]);
+          } else {
+            self.map_keys = null;
+            self.map_values = null;
+          }
         }
-        target = self.indata[args.tagname!][args.index! - 1];
+        if (self.map_values) {
+          target = self.map_values[args.index! - 1];
+        } else {
+          target = self.indata[args.tagname!][args.index! - 1];
+        }
         if (target === null || target === undefined) {
           return CONSTANTS.SPROTO_CB_NIL;
         }
@@ -1662,7 +1684,12 @@ const sproto = (() => {
       if (args.index !== 0) {
         if (args.tagname !== self.array_tag) {
           self.array_tag = args.tagname;
-          self.result[args.tagname!] = [];
+          // 如果有 mainindex（map 类型），初始化为对象；否则初始化为数组
+          if (args.mainindex !== undefined && args.mainindex >= 0) {
+            self.result[args.tagname!] = {};
+          } else {
+            self.result[args.tagname!] = [];
+          }
           if (args.index! < 0) {
             return 0;
           }
@@ -1723,6 +1750,17 @@ const sproto = (() => {
               r = sprotoDecode(args.subtype!, args.value as number[], args.length!, decode, sub);
               if (r < 0 || r !== args.length) {
                 return r;
+              }
+              // map 类型：找到 mainindex 对应的字段名，用其值作为 Record 的 key
+              if (args.index! > 0) {
+                const keyField = findTag(args.subtype!, args.mainindex!);
+                if (keyField && keyField.name) {
+                  const mapKey = sub.result[keyField.name];
+                  if (mapKey !== undefined && mapKey !== null) {
+                    (self.result[args.tagname!] as Record<string | number, unknown>)[mapKey as string | number] = sub.result;
+                    return 0;
+                  }
+                }
               }
               value = sub.result;
               break;
