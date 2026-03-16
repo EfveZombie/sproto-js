@@ -125,10 +125,17 @@ export interface SprotoInstance {
   host: (packagename?: string) => SprotoHost;
 }
 
+export interface SprotoOptions {
+  /** 将协议中定义为 integer 的字段解析为 number 还是 bigint，默认为 "number" */
+  decodeIntegerAs?: "number" | "bigint";
+  /** 将协议中的 map 类型解析为 Record 对象还是 Map 对象，默认为 "Record" */
+  decodeMapAs?: "Record" | "Map";
+}
+
 export interface SprotoAPI {
   pack: (inbuf: number[]) => number[];
   unpack: (inbuf: number[]) => number[];
-  createNew: (binsch: number[]) => SprotoInstance | null;
+  createNew: (binsch: number[], options?: SprotoOptions) => SprotoInstance | null;
 }
 
 const sproto = (() => {
@@ -1327,7 +1334,7 @@ const sproto = (() => {
     return buffer;
   };
 
-  api.createNew = (binsch: number[]): SprotoInstance | null => {
+  api.createNew = (binsch: number[], options?: SprotoOptions): SprotoInstance | null => {
     const s: Partial<SprotoInstance> = {};
     let enbuffer: number[];
     s.type_n = 0;
@@ -1336,6 +1343,11 @@ const sproto = (() => {
     s.proto = null;
     s.tcache = new Map();
     s.pcache = new Map();
+
+    // 解析选项，设置默认值
+    const decodeIntegerAs = options?.decodeIntegerAs ?? "number";
+    const decodeMapAs = options?.decodeMapAs ?? "Record";
+
     const sp = createFromBundle(s as SprotoInstance, binsch, binsch.length);
     if (sp === null) return null;
 
@@ -1731,9 +1743,13 @@ const sproto = (() => {
       if (args.index !== 0) {
         if (args.tagname !== self.array_tag) {
           self.array_tag = args.tagname;
-          // 如果有 mainindex（map 类型），初始化为对象；否则初始化为数组
+          // 如果有 mainindex（map 类型），根据 decodeMapAs 选项初始化为 Map 或 Record；否则初始化为数组
           if (args.mainindex !== undefined && args.mainindex >= 0) {
-            self.result[args.tagname!] = {};
+            if (decodeMapAs === "Map") {
+              self.result[args.tagname!] = new Map();
+            } else {
+              self.result[args.tagname!] = {};
+            }
           } else {
             self.result[args.tagname!] = [];
           }
@@ -1746,11 +1762,18 @@ const sproto = (() => {
       switch (args.type) {
         case CONSTANTS.SPROTO_TINTEGER:
           {
+            let intValue: number;
             if (args.extra) {
               const v = args.value as number;
-              value = v / args.extra;
+              intValue = v / args.extra;
             } else {
-              value = args.value as number;
+              intValue = args.value as number;
+            }
+            // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
+            if (decodeIntegerAs === "bigint") {
+              value = BigInt(intValue);
+            } else {
+              value = intValue;
             }
             break;
           }
@@ -1798,13 +1821,18 @@ const sproto = (() => {
               if (r < 0 || r !== args.length) {
                 return r;
               }
-              // map 类型：找到 mainindex 对应的字段名，用其值作为 Record 的 key
+              // map 类型：找到 mainindex 对应的字段名，用其值作为 key
               if (args.index! > 0) {
                 const keyField = findTag(args.subtype!, args.mainindex!);
                 if (keyField && keyField.name) {
                   const mapKey = sub.result[keyField.name];
                   if (mapKey !== undefined && mapKey !== null) {
-                    (self.result[args.tagname!] as Record<string | number, unknown>)[mapKey as string | number] = sub.result;
+                    // 根据 decodeMapAs 选项决定使用 Map 还是 Record
+                    if (decodeMapAs === "Map") {
+                      (self.result[args.tagname!] as Map<unknown, unknown>).set(mapKey, sub.result);
+                    } else {
+                      (self.result[args.tagname!] as Record<string | number, unknown>)[mapKey as string | number] = sub.result;
+                    }
                     return 0;
                   }
                 }
