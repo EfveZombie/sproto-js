@@ -7,3 +7,5 @@ export default sproto;
 // ESM 命名导出
 export { sproto };
 export const createNew = sproto.createNew;
+// 导出类型
+export type { SprotoOptions } from './sproto.js';
