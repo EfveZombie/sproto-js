@@ -1,7 +1,7 @@
 // sproto.ts - TypeScript版本的sproto协议解析库
 
 // 类型定义
-export type SprotoValue = string | number | boolean | number[] | Uint8Array | Record<string, unknown> | Record<string | number, Record<string, unknown>> | null;
+export type SprotoValue = string | number | boolean | bigint | number[] | Uint8Array | Record<string, unknown> | Record<string | number, Record<string, unknown>> | null;
 
 export interface SprotoUserData {
   deep?: number;
@@ -14,7 +14,7 @@ export interface SprotoUserData {
   iter_index?: number;
   mainindex_tag?: number;
   key_index?: number;
-  map_keys?: string[] | null;
+  map_keys?: Array<string | number | boolean | bigint> | null;
   map_values?: unknown[] | null;
   [key: string]: unknown;
 }
@@ -718,15 +718,26 @@ const sproto = (() => {
     return fillSize(data, dataIdx, 4);
   }
 
-  function encodeUint64(v: number, data: number[], dataIdx: number, size: number): number {
-    data[dataIdx + 4] = v & 0xff;
-    data[dataIdx + 5] = utils.uint64Rshift(v, 8) & 0xff;
-    data[dataIdx + 6] = utils.uint64Rshift(v, 16) & 0xff;
-    data[dataIdx + 7] = utils.uint64Rshift(v, 24) & 0xff;
-    data[dataIdx + 8] = utils.uint64Rshift(v, 32) & 0xff;
-    data[dataIdx + 9] = utils.uint64Rshift(v, 40) & 0xff;
-    data[dataIdx + 10] = utils.uint64Rshift(v, 48) & 0xff;
-    data[dataIdx + 11] = utils.uint64Rshift(v, 56) & 0xff;
+  function encodeUint64(v: number | bigint, data: number[], dataIdx: number, size: number): number {
+    if (typeof v === 'bigint') {
+      data[dataIdx + 4] = Number(v & 0xffn);
+      data[dataIdx + 5] = Number((v >> 8n) & 0xffn);
+      data[dataIdx + 6] = Number((v >> 16n) & 0xffn);
+      data[dataIdx + 7] = Number((v >> 24n) & 0xffn);
+      data[dataIdx + 8] = Number((v >> 32n) & 0xffn);
+      data[dataIdx + 9] = Number((v >> 40n) & 0xffn);
+      data[dataIdx + 10] = Number((v >> 48n) & 0xffn);
+      data[dataIdx + 11] = Number((v >> 56n) & 0xffn);
+    } else {
+      data[dataIdx + 4] = v & 0xff;
+      data[dataIdx + 5] = utils.uint64Rshift(v, 8) & 0xff;
+      data[dataIdx + 6] = utils.uint64Rshift(v, 16) & 0xff;
+      data[dataIdx + 7] = utils.uint64Rshift(v, 24) & 0xff;
+      data[dataIdx + 8] = utils.uint64Rshift(v, 32) & 0xff;
+      data[dataIdx + 9] = utils.uint64Rshift(v, 40) & 0xff;
+      data[dataIdx + 10] = utils.uint64Rshift(v, 48) & 0xff;
+      data[dataIdx + 11] = utils.uint64Rshift(v, 56) & 0xff;
+    }
     return fillSize(data, dataIdx, 8);
   }
 
@@ -917,15 +928,27 @@ const sproto = (() => {
           intlen = 8;
         }
 
-        const v = args.value as number;
-        buffer[bufferIdx] = v & 0xff;
-        buffer[bufferIdx + 1] = utils.uint64Rshift(v, 8) & 0xff;
-        buffer[bufferIdx + 2] = utils.uint64Rshift(v, 16) & 0xff;
-        buffer[bufferIdx + 3] = utils.uint64Rshift(v, 24) & 0xff;
-        buffer[bufferIdx + 4] = utils.uint64Rshift(v, 32) & 0xff;
-        buffer[bufferIdx + 5] = utils.uint64Rshift(v, 40) & 0xff;
-        buffer[bufferIdx + 6] = utils.uint64Rshift(v, 48) & 0xff;
-        buffer[bufferIdx + 7] = utils.uint64Rshift(v, 56) & 0xff;
+        const rawValue = args.value;
+        if (typeof rawValue === 'bigint') {
+          buffer[bufferIdx] = Number(rawValue & 0xffn);
+          buffer[bufferIdx + 1] = Number((rawValue >> 8n) & 0xffn);
+          buffer[bufferIdx + 2] = Number((rawValue >> 16n) & 0xffn);
+          buffer[bufferIdx + 3] = Number((rawValue >> 24n) & 0xffn);
+          buffer[bufferIdx + 4] = Number((rawValue >> 32n) & 0xffn);
+          buffer[bufferIdx + 5] = Number((rawValue >> 40n) & 0xffn);
+          buffer[bufferIdx + 6] = Number((rawValue >> 48n) & 0xffn);
+          buffer[bufferIdx + 7] = Number((rawValue >> 56n) & 0xffn);
+        } else {
+          const v = rawValue as number;
+          buffer[bufferIdx] = v & 0xff;
+          buffer[bufferIdx + 1] = utils.uint64Rshift(v, 8) & 0xff;
+          buffer[bufferIdx + 2] = utils.uint64Rshift(v, 16) & 0xff;
+          buffer[bufferIdx + 3] = utils.uint64Rshift(v, 24) & 0xff;
+          buffer[bufferIdx + 4] = utils.uint64Rshift(v, 32) & 0xff;
+          buffer[bufferIdx + 5] = utils.uint64Rshift(v, 40) & 0xff;
+          buffer[bufferIdx + 6] = utils.uint64Rshift(v, 48) & 0xff;
+          buffer[bufferIdx + 7] = utils.uint64Rshift(v, 56) & 0xff;
+        }
       }
 
       bufferIdx += intlen;
@@ -1461,10 +1484,15 @@ const sproto = (() => {
             return CONSTANTS.SPROTO_CB_NOARRAY;
           }
 
+          const fieldData = self.indata[args.tagname!];
           // 判断是否为 map 类型（非数组的对象）
-          if (!Array.isArray(self.indata[args.tagname!])) {
-            self.map_keys = Object.keys(self.indata[args.tagname!] as Record<string, unknown>);
-            self.map_values = self.map_keys.map(k => (self.indata[args.tagname!] as Record<string, unknown>)[k]);
+          if (fieldData instanceof Map) {
+            self.map_keys = Array.from(fieldData.keys());
+            self.map_values = Array.from(fieldData.values());
+          } else if (!Array.isArray(fieldData)) {
+            const stringKeys = Object.keys(fieldData as Record<string, unknown>);
+            self.map_keys = stringKeys;
+            self.map_values = stringKeys.map(k => (fieldData as Record<string, unknown>)[k]);
           } else {
             self.map_keys = null;
             self.map_values = null;
@@ -1485,6 +1513,10 @@ const sproto = (() => {
       switch (args.type) {
         case CONSTANTS.SPROTO_TINTEGER:
           {
+            if (typeof target === 'bigint') {
+              args.value = target;
+              return 8;
+            }
             let v: number, vh: number;
             if (args.extra! > 0) {
               const vn = target as number;
@@ -1540,7 +1572,22 @@ const sproto = (() => {
             const sub: any = {};
             sub.st = args.subtype;
             sub.deep = currentDeep + 1;
-            sub.indata = target as Record<string, unknown>;
+            if (args.mainindex !== undefined && args.mainindex >= 0 && args.index! > 0 && self.map_keys) {
+              const key = self.map_keys[args.index! - 1];
+              const keyField = findTag(args.subtype!, args.mainindex);
+              if (keyField && keyField.name) {
+                if (typeof target === 'object' && target !== null) {
+                  sub.indata = { ...target };
+                } else {
+                  sub.indata = {};
+                }
+                sub.indata[keyField.name] = key;
+              } else {
+                sub.indata = target;
+              }
+            } else {
+              sub.indata = target as Record<string, unknown>;
+            }
             const r = sprotoEncode(args.subtype!, args.buffer!, args.buffer_idx!, encode, sub);
             if (r < 0) {
               return CONSTANTS.SPROTO_CB_ERROR;
