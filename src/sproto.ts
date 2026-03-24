@@ -16,6 +16,8 @@ export interface SprotoUserData {
   key_index?: number;
   map_keys?: Array<string | number | boolean | bigint> | null;
   map_values?: unknown[] | null;
+  decodeIntegerAs?: "number" | "bigint";
+  decodeMapAs?: "Record" | "Map";
   [key: string]: unknown;
 }
 
@@ -117,11 +119,11 @@ export interface SprotoInstance {
   dump: () => void;
   objlen: (type: string | number | SprotoType, inbuf: number[]) => number | null;
   encode: (type: string | number | SprotoType, indata: Record<string, unknown>) => number[] | null;
-  decode: (type: string | number | SprotoType, inbuf: number[]) => Record<string, unknown> | null;
+  decode: (type: string | number | SprotoType, inbuf: number[], options?: SprotoOptions) => Record<string, unknown> | null;
   pack: (inbuf: number[]) => number[];
   unpack: (inbuf: number[]) => number[];
   pencode: (type: string | number | SprotoType, inbuf: Record<string, unknown>) => number[] | null;
-  pdecode: (type: string | number | SprotoType, inbuf: number[]) => Record<string, unknown> | null;
+  pdecode: (type: string | number | SprotoType, inbuf: number[], options?: SprotoOptions) => Record<string, unknown> | null;
   host: (packagename?: string) => SprotoHost;
 }
 
@@ -1749,7 +1751,7 @@ const sproto = (() => {
           self.array_tag = args.tagname;
           // 如果有 mainindex（map 类型），根据 decodeMapAs 选项初始化为 Map 或 Record；否则初始化为数组
           if (args.mainindex !== undefined && args.mainindex >= 0) {
-            if (decodeMapAs === "Map") {
+            if (self.decodeMapAs === "Map") {
               self.result[args.tagname!] = new Map();
             } else {
               self.result[args.tagname!] = {};
@@ -1774,7 +1776,7 @@ const sproto = (() => {
               intValue = args.value as number;
             }
             // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
-            if (decodeIntegerAs === "bigint") {
+            if (self.decodeIntegerAs === "bigint") {
               value = BigInt(intValue);
             } else {
               value = intValue;
@@ -1819,6 +1821,8 @@ const sproto = (() => {
             sub.array_index = 0;
             sub.array_tag = null;
             sub.result = {};
+            sub.decodeIntegerAs = self.decodeIntegerAs;
+            sub.decodeMapAs = self.decodeMapAs;
             if (args.mainindex! >= 0) {
               sub.mainindex_tag = args.mainindex;
               r = sprotoDecode(args.subtype!, args.value as number[], args.length!, decode, sub);
@@ -1832,7 +1836,7 @@ const sproto = (() => {
                   const mapKey = sub.result[keyField.name];
                   if (mapKey !== undefined && mapKey !== null) {
                     // 根据 decodeMapAs 选项决定使用 Map 还是 Record
-                    if (decodeMapAs === "Map") {
+                    if (self.decodeMapAs === "Map") {
                       (self.result[args.tagname!] as Map<unknown, unknown>).set(mapKey, sub.result);
                     } else {
                       (self.result[args.tagname!] as Record<string | number, unknown>)[mapKey as string | number] = sub.result;
@@ -1942,6 +1946,8 @@ const sproto = (() => {
       ud.array_tag = null;
       ud.deep = 0;
       ud.result = {};
+      ud.decodeIntegerAs = decodeIntegerAs;
+      ud.decodeMapAs = decodeMapAs;
       return sprotoDecode(st, inbuf, inbuf.length, decode, ud);
     };
 
@@ -1977,7 +1983,7 @@ const sproto = (() => {
       }
     };
 
-    sp.decode = function (type: string | number | SprotoType, inbuf: number[]): any {
+    sp.decode = function (type: string | number | SprotoType, inbuf: number[], overrideOptions?: SprotoOptions): any {
       let st: SprotoType | null = null;
       if (typeof (type) === "string" || typeof (type) === "number") {
         st = queryType(sp, type as string);
@@ -1994,6 +2000,8 @@ const sproto = (() => {
       ud.array_tag = null;
       ud.deep = 0;
       ud.result = {};
+      ud.decodeIntegerAs = overrideOptions?.decodeIntegerAs ?? decodeIntegerAs;
+      ud.decodeMapAs = overrideOptions?.decodeMapAs ?? decodeMapAs;
       const r = sprotoDecode(st, buffer, sz, decode, ud);
       if (r < 0) {
         return null;
@@ -2018,12 +2026,12 @@ const sproto = (() => {
       return sp.pack(obuf);
     };
 
-    sp.pdecode = function (type: string | number | SprotoType, inbuf: number[]): any {
+    sp.pdecode = function (type: string | number | SprotoType, inbuf: number[], overrideOptions?: SprotoOptions): any {
       const obuf = sp.unpack(inbuf);
       if (obuf === null) {
         return null;
       }
-      return sp.decode(type, obuf);
+      return sp.decode(type, obuf, overrideOptions);
     };
 
     sp.host = function (packagename?: string): any {
