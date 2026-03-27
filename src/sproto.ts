@@ -26,7 +26,7 @@ export interface SprotoHost {
   package: SprotoType | string;
   session: Record<number, SprotoType | boolean>;
   attachsp?: SprotoInstance;
-  attach: (sp: SprotoInstance) => (name: string, args: Record<string, unknown>, session: number) => number[];
+  attach: (sp: SprotoInstance) => (name: string, args: Record<string, unknown>, session?: number) => number[];
   dispatch: (buffer: number[]) => SprotoDispatchResult;
 }
 
