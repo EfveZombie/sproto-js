@@ -26,18 +26,24 @@ jobs:
         run: bun run build
 
       - name: Run tests with coverage
-        run: bun run test:coverage 2>&1 | tee test-output.txt || true
+        run: |
+          NO_COLOR=1 bun run test:coverage 2>&1 | tee test-output.txt
+          test_exit=${PIPESTATUS[0]}
+          echo "test_exit=$test_exit" >> $GITHUB_ENV
+          exit $test_exit
 
       - name: Write coverage to Job Summary
         if: always()
         run: |
+          # Strip any remaining ANSI escape sequences
+          sed -i 's/\x1b\[[0-9;]*m//g' test-output.txt
+
           echo '## Test Coverage' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           sed -n '/Coverage report/,/^$/p' test-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          # Extract test summary line
           echo '## Test Results' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
