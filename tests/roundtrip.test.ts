@@ -140,7 +140,7 @@ describe('roundtrip - encode/decode arrays', () => {
   // 1. sproto.ts ~L1128 decodeArray 缺少 SPROTO_TDOUBLE 分支，double 数组无法解码
   // 2. sproto.ts doubleToBinary/getDoubleHex 编码 double 数组时产生 undefined 值
   // [BUG-SKIP] double 数组编解码 bug
-  it.skip('should round-trip double array', () => {
+  it('should round-trip double array', () => {
     const sp = loadPersonDataSproto();
     const doubles = [1.1, 2.2, 3.3, -4.4];
     const encoded = sp.encode('Data', { doubles });
@@ -283,7 +283,7 @@ describe('roundtrip - full pipeline (pencode/pdecode)', () => {
   // 1. sproto.ts ~L1128 decodeArray 缺少 SPROTO_TDOUBLE 分支，double 数组无法解码
   // 2. sproto.ts doubleToBinary/getDoubleHex 编码 double 数组时产生 undefined 值
   // [BUG-SKIP] double 数组编解码 bug
-  it.skip('should pencode/pdecode Data with all field types', () => {
+  it('should pencode/pdecode Data with all field types', () => {
     const sp = loadPersonDataSproto();
     const original = {
       numbers: [1, 2, 3],
@@ -868,7 +868,7 @@ describe('roundtrip - binary field (bin field)', () => {
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
   // The decode callback at L1826-1827 should return a Uint8Array for binary fields (extra=1),
   // but currently the decoded value is undefined. This appears to be a bug in the source code.
-  it.skip('should round-trip binary field with Uint8Array', () => {
+  it('should round-trip binary field with Uint8Array', () => {
     const sp = loadPersonDataSproto();
     const original = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
     const encoded = sp.encode('Data', { bin: original });
@@ -881,7 +881,7 @@ describe('roundtrip - binary field (bin field)', () => {
   });
 
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
-  it.skip('should round-trip binary field with number array', () => {
+  it('should round-trip binary field with number array', () => {
     const sp = loadPersonDataSproto();
     const original = [0x57, 0x6f, 0x72, 0x6c, 0x64]; // "World"
     const encoded = sp.encode('Data', { bin: original });
@@ -894,7 +894,7 @@ describe('roundtrip - binary field (bin field)', () => {
   });
 
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
-  it.skip('should round-trip empty binary field', () => {
+  it('should round-trip empty binary field', () => {
     const sp = loadPersonDataSproto();
     const original = new Uint8Array([]);
     const encoded = sp.encode('Data', { bin: original });
@@ -907,7 +907,7 @@ describe('roundtrip - binary field (bin field)', () => {
   });
 
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
-  it.skip('should round-trip binary field with large data', () => {
+  it('should round-trip binary field with large data', () => {
     const sp = loadPersonDataSproto();
     const original = new Uint8Array(1000).fill(0xAB);
     const encoded = sp.encode('Data', { bin: original });
@@ -921,7 +921,7 @@ describe('roundtrip - binary field (bin field)', () => {
   });
 
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
-  it.skip('should round-trip binary field with all byte values', () => {
+  it('should round-trip binary field with all byte values', () => {
     const sp = loadPersonDataSproto();
     const original = new Uint8Array(256);
     for (let i = 0; i < 256; i++) {
@@ -937,7 +937,7 @@ describe('roundtrip - binary field (bin field)', () => {
   });
 
   // [BUG] Binary field decoding returns undefined instead of Uint8Array
-  it.skip('should round-trip binary field with null bytes', () => {
+  it('should round-trip binary field with null bytes', () => {
     const sp = loadPersonDataSproto();
     const original = new Uint8Array([0x00, 0x01, 0x00, 0x02, 0x00]);
     const encoded = sp.encode('Data', { bin: original });

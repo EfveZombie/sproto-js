@@ -90,7 +90,7 @@ describe('decode - cross-validation with C fixtures', () => {
   // 导致 double 类型数组解码时落入 default 分支返回 -1，doubles 字段解码失败。
   // 单个 double 字段解码正常（走的是 decodeField 而非 decodeArray），所以只有数组受影响。
   // [BUG-SKIP] decodeArray 缺少 SPROTO_TDOUBLE 分支，double 数组解码失败
-  it.skip('should decode example7: Data with double and doubles array', () => {
+  it('should decode example7: Data with double and doubles array', () => {
     const sp = loadPersonDataSproto();
     const data = loadTestData('example7_encoded.bin');
     const decoded = sp.decode('Data', data);

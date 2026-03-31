@@ -17,7 +17,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 1: Person { name="Alice", age=13, marital=false }
   // [BUG-SKIP] 编码回调 bug 导致缺失数组字段未被正确跳过
-  it.skip('should encode example1: Person { name="Alice", age=13, marital=false }', () => {
+  it('should encode example1: Person { name="Alice", age=13, marital=false }', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Person', {
       name: 'Alice',
@@ -32,7 +32,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 2: Person { name="Bob", age=40, children=[{name="Alice",age=13},{name="Carol",age=5}] }
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example2: Person with children', () => {
+  it('should encode example2: Person with children', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Person', {
       name: 'Bob',
@@ -50,7 +50,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 3: Data { numbers=[1,2,3,4,5] }
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example3: Data { numbers=[1,2,3,4,5] }', () => {
+  it('should encode example3: Data { numbers=[1,2,3,4,5] }', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', {
       numbers: [1, 2, 3, 4, 5],
@@ -63,7 +63,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 4: Data { numbers=[(1<<32)+1, (1<<32)+2, (1<<32)+3] }
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example4: Data with large 64-bit integers', () => {
+  it('should encode example4: Data with large 64-bit integers', () => {
     const sp = loadPersonDataSproto();
     const base = Math.pow(2, 32);
     const encoded = sp.encode('Data', {
@@ -77,7 +77,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 5: Data { bools=[false, true, false] }
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example5: Data { bools=[false, true, false] }', () => {
+  it('should encode example5: Data { bools=[false, true, false] }', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', {
       bools: [false, true, false],
@@ -90,7 +90,7 @@ describe('encode - cross-validation with C fixtures', () => {
 
   // Example 6: Data { number=100000, bignumber=-10000000000 }
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example6: Data { number=100000, bignumber=-10000000000 }', () => {
+  it('should encode example6: Data { number=100000, bignumber=-10000000000 }', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', {
       number: 100000,
@@ -107,7 +107,7 @@ describe('encode - cross-validation with C fixtures', () => {
   // sproto.ts 中 doubleToBinary/getDoubleHex 手动实现 IEEE 754 转换时，
   // 对 double 数组元素产生 undefined 值写入 buffer，导致编码结果错误。
   // [BUG-SKIP] 编码回调 bug + double 数组编码 bug
-  it.skip('should encode example7: Data with double and doubles array', () => {
+  it('should encode example7: Data with double and doubles array', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', {
       double: 0.01171875,
@@ -122,7 +122,7 @@ describe('encode - cross-validation with C fixtures', () => {
   // Example 8: Data { fpn=1.82 }
   // fpn is integer(2), so 1.82 is multiplied by 100 -> 182 during encoding
   // [BUG-SKIP] 编码回调 bug
-  it.skip('should encode example8: Data { fpn=1.82 } (fixed-point integer(2))', () => {
+  it('should encode example8: Data { fpn=1.82 } (fixed-point integer(2))', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', {
       fpn: 1.82,
@@ -153,7 +153,7 @@ describe('encode - round-trip (decode then re-encode)', () => {
 
   for (const { type, file } of examples) {
     // [BUG-SKIP] 编码回调 bug 导致 re-encode 结果与原始不一致
-    it.skip(`should decode and re-encode ${file} to identical bytes`, () => {
+    it(`should decode and re-encode ${file} to identical bytes`, () => {
       const sp = loadPersonDataSproto();
       const original = loadTestData(file);
       const decoded = sp.decode(type, original);
@@ -170,7 +170,7 @@ describe('encode - AddressBook (map type)', () => {
   // [BUG] 同上述编码回调 bug（sproto.ts ~L1491），AddressBook 编码也受影响。
   // 此外 AddressBook 的 person 字段为 map 类型 *Person(id)，涉及 mainindex 编码路径。
   // [BUG-SKIP] 编码回调 bug 导致 AddressBook 编码结果与 C fixture 不一致
-  it.skip('should encode addressbook and match C fixture', () => {
+  it('should encode addressbook and match C fixture', () => {
     const sp = loadAddressBookSproto();
     const data = loadTestData('addressbook_encoded.bin');
     const decoded = sp.decode('AddressBook', data);
@@ -490,7 +490,7 @@ describe('encode - internal branches coverage', () => {
   // L904-910: encodeIntegerArray 中的错误路径
   // 当数组元素编码返回非正值且不是 SPROTO_CB_NIL 或 SPROTO_CB_NOARRAY 时
   // 此路径难以直接触发，因为 encode 回调总是返回有效值
-  it.skip('should handle integer array encoding error path', () => {
+  it('should handle integer array encoding error path', () => {
     // 此路径需要回调返回错误，但当前实现难以触发
     const sp = loadPersonDataSproto();
     // 无法构造触发此路径的数据
@@ -535,7 +535,7 @@ describe('encode - internal branches coverage', () => {
   // L1001-1008: sprotoEncode 中 data section 写入
   // 当 sz < 0 时返回 -1（编码错误）
   // 此路径难以直接触发，因为 encode 回调不会返回负值（除非是特殊常量）
-  it.skip('should handle encode error in data section', () => {
+  it('should handle encode error in data section', () => {
     // 此路径需要编码返回错误，但当前实现难以触发
   });
 
