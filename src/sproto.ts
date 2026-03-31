@@ -777,72 +777,14 @@ const sproto = (() => {
     return result;
   }
 
-  function getDoubleHex(decString: string): string {
-    let sign: number;
-    let signString: string;
-    let exponent: number;
-    const decValue = parseFloat(Math.abs(parseFloat(decString)).toString());
-    if (decString.toString().charAt(0) === '-') {
-      sign = 1;
-      signString = "1";
-    } else {
-      sign = 0;
-      signString = "0";
-    }
-    if (decValue === 0) {
-      exponent = 0;
-    } else {
-      exponent = 1023;
-      let tempDecValue = decValue;
-      if (tempDecValue >= 2) {
-        while (tempDecValue >= 2) {
-          exponent++;
-          tempDecValue /= 2;
-        }
-      } else if (tempDecValue < 1) {
-        while (tempDecValue < 1) {
-          exponent--;
-          tempDecValue *= 2;
-          if (exponent === 0) {
-            break;
-          }
-        }
-      }
-      if (exponent !== 0) tempDecValue -= 1; else tempDecValue /= 2;
-      const fractionString = decToBinTail(tempDecValue, 52);
-      const exponentString = decToBinHead(exponent, 11);
-      const doubleBinStr = signString + exponentString + fractionString;
-      let doubleHexStr = "";
-      for (let i = 0, j = 0; i < 8; i++, j += 8) {
-        const m = 3 - (j % 4);
-        const hexUnit = parseInt(doubleBinStr[j]) * Math.pow(2, m) + parseInt(doubleBinStr[j + 1]) * Math.pow(2, m - 1) + parseInt(doubleBinStr[j + 2]) * Math.pow(2, m - 2) + parseInt(doubleBinStr[j + 3]) * Math.pow(2, m - 3);
-        const hexDecade = parseInt(doubleBinStr[j + 4]) * Math.pow(2, m) + parseInt(doubleBinStr[j + 5]) * Math.pow(2, m - 1) + parseInt(doubleBinStr[j + 6]) * Math.pow(2, m - 2) + parseInt(doubleBinStr[j + 7]) * Math.pow(2, m - 3);
-        doubleHexStr = doubleHexStr + hexUnit.toString(16) + hexDecade.toString(16);
-      }
-      return doubleHexStr;
-    }
-    return "";
-  }
 
   function doubleToBinary(v: number, data: number[], dataIdx: number): number {
-    const str = Number(v).toString();
-    const hexStr = getDoubleHex(str);
-    if (!hexStr) {
-      // Handle case where getDoubleHex returns empty string
-      for (let i = 0; i < 8; i++) {
-        data[dataIdx + i + 4] = 0;
-      }
-      return fillSize(data, dataIdx, 8);
-    }
-    const arr: number[] = [];
-    for (let i = 0, j = 0; i < 8; i++, j += 2) {
-      const dec = parseInt(hexStr[j] || '0', 16) * 16 + parseInt(hexStr[j + 1] || '0', 16);
-      arr.push(dec);
-    }
-    arr.reverse();
+    const buf = new ArrayBuffer(8);
+    const view = new DataView(buf);
+    view.setFloat64(0, v, true); // little-endian，与 binaryToDouble 对称
+    // dataIdx 处为 4 字节长度前缀，数据从 dataIdx+4 开始写（与 encodeInteger/encodeUint64 一致）
     for (let i = 0; i < 8; i++) {
-      const dec = arr[i] || 0;
-      data[dataIdx + i + 4] = dec;
+      data[dataIdx + 4 + i] = view.getUint8(i);
     }
     return fillSize(data, dataIdx, 8);
   }
@@ -988,6 +930,41 @@ const sproto = (() => {
           return 0;
         }
         break;
+      case CONSTANTS.SPROTO_TDOUBLE:
+        {
+          // double 数组格式：1 字节 len 前缀（值为 8），后跟 N×8 字节 little-endian IEEE 754 数据
+          // 与 decodeArray 中 SPROTO_TDOUBLE 分支对称
+          const headerIdx = bufferIdx;
+          bufferIdx++; // 跳过 len 前缀字节
+          args.index = 1;
+          for (; ;) {
+            args.value = 0;
+            args.length = 8;
+            sz = cb(args);
+            if (sz < 0) {
+              if (sz === CONSTANTS.SPROTO_CB_NIL) break;
+              if (sz === CONSTANTS.SPROTO_CB_NOARRAY) return 0;
+              return -1;
+            }
+            if (sz !== 8) return -1;
+            // 使用 DataView 将 double 写入 buffer（little-endian）
+            const dblBuf = new ArrayBuffer(8);
+            const dblView = new DataView(dblBuf);
+            dblView.setFloat64(0, args.value as number, true);
+            for (let i = 0; i < 8; i++) {
+              buffer[bufferIdx + i] = dblView.getUint8(i);
+            }
+            bufferIdx += 8;
+            ++args.index!;
+          }
+          if (bufferIdx === headerIdx + 1) {
+            // 没有任何元素，回退
+            bufferIdx = headerIdx;
+          } else {
+            buffer[headerIdx] = 8; // len 前缀 = 8
+          }
+          break;
+        }
       case CONSTANTS.SPROTO_TBOOLEAN:
         args.index = 1;
         for (; ;) {
@@ -1116,6 +1093,32 @@ const sproto = (() => {
           return -1;
         }
         break;
+      case CONSTANTS.SPROTO_TDOUBLE:
+        {
+          // double 数组格式与 integer(8) 相同：1 字节 len 前缀（值为 8），后跟 N×8 字节数据
+          const dblLen = stream[0];
+          if (dblLen !== 8) {
+            return -1;
+          }
+          const dblData = stream.slice(1);
+          const remainingDblSz = sz - 1;
+          if (remainingDblSz % 8 !== 0) {
+            return -1;
+          }
+          for (let i = 0; i < Math.floor(remainingDblSz / 8); i++) {
+            const buf = new ArrayBuffer(8);
+            const view = new DataView(buf);
+            for (let b = 0; b < 8; b++) {
+              view.setUint8(b, dblData[i * 8 + b]);
+            }
+            const value = view.getFloat64(0, true); // little-endian
+            args.index = i + 1;
+            args.value = value;
+            args.length = 8;
+            cb(args);
+          }
+          break;
+        }
       case CONSTANTS.SPROTO_TBOOLEAN:
         for (let i = 0; i < sz; i++) {
           const value = stream[i];
@@ -1480,6 +1483,10 @@ const sproto = (() => {
       }
 
       if (!self.indata || self.indata[args.tagname!] === null || self.indata[args.tagname!] === undefined) {
+        // 如果是数组请求（index > 0），应返回 SPROTO_CB_NOARRAY 告知编码器跳过整个数组字段
+        if (args.index! > 0) {
+          return CONSTANTS.SPROTO_CB_NOARRAY;
+        }
         return CONSTANTS.SPROTO_CB_NIL;
       }
 
@@ -1764,18 +1771,19 @@ const sproto = (() => {
       switch (args.type) {
         case CONSTANTS.SPROTO_TINTEGER:
           {
-            let intValue: number;
             if (args.extra) {
+              // decimal 字段（integer(N)）：先除以精度得到浮点数，始终返回 number
+              // 不适合转 bigint（BigInt 不支持小数）
               const v = args.value as number;
-              intValue = v / args.extra;
+              value = v / args.extra;
             } else {
-              intValue = args.value as number;
-            }
-            // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
-            if (self.decodeIntegerAs === "bigint") {
-              value = BigInt(intValue);
-            } else {
-              value = intValue;
+              const intValue = args.value as number;
+              // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
+              if (self.decodeIntegerAs === "bigint") {
+                value = BigInt(intValue);
+              } else {
+                value = intValue;
+              }
             }
             break;
           }
