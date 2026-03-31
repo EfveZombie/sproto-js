@@ -1120,6 +1120,32 @@ const sproto = (() => {
           return -1;
         }
         break;
+      case CONSTANTS.SPROTO_TDOUBLE:
+        {
+          // double 数组格式与 integer(8) 相同：1 字节 len 前缀（值为 8），后跟 N×8 字节数据
+          const dblLen = stream[0];
+          if (dblLen !== 8) {
+            return -1;
+          }
+          const dblData = stream.slice(1);
+          const remainingDblSz = sz - 1;
+          if (remainingDblSz % 8 !== 0) {
+            return -1;
+          }
+          for (let i = 0; i < Math.floor(remainingDblSz / 8); i++) {
+            const buf = new ArrayBuffer(8);
+            const view = new DataView(buf);
+            for (let b = 0; b < 8; b++) {
+              view.setUint8(b, dblData[i * 8 + b]);
+            }
+            const value = view.getFloat64(0, true); // little-endian
+            args.index = i + 1;
+            args.value = value;
+            args.length = 8;
+            cb(args);
+          }
+          break;
+        }
       case CONSTANTS.SPROTO_TBOOLEAN:
         for (let i = 0; i < sz; i++) {
           const value = stream[i];
@@ -1768,18 +1794,19 @@ const sproto = (() => {
       switch (args.type) {
         case CONSTANTS.SPROTO_TINTEGER:
           {
-            let intValue: number;
             if (args.extra) {
+              // decimal 字段（integer(N)）：先除以精度得到浮点数，始终返回 number
+              // 不适合转 bigint（BigInt 不支持小数）
               const v = args.value as number;
-              intValue = v / args.extra;
+              value = v / args.extra;
             } else {
-              intValue = args.value as number;
-            }
-            // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
-            if (self.decodeIntegerAs === "bigint") {
-              value = BigInt(intValue);
-            } else {
-              value = intValue;
+              const intValue = args.value as number;
+              // 根据 decodeIntegerAs 选项决定返回 number 还是 bigint
+              if (self.decodeIntegerAs === "bigint") {
+                value = BigInt(intValue);
+              } else {
+                value = intValue;
+              }
             }
             break;
           }
