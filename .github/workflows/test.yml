@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+    branches: ['*']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Run tests with coverage
+        run: |
+          NO_COLOR=1 bun run test:coverage 2>&1 | tee test-output.txt
+          test_exit=${PIPESTATUS[0]}
+          echo "test_exit=$test_exit" >> $GITHUB_ENV
+          exit $test_exit
+
+      - name: Write coverage to Job Summary
+        if: always()
+        run: |
+          # Strip any remaining ANSI escape sequences
+          sed -i 's/\x1b\[[0-9;]*m//g' test-output.txt
+
+          echo '## Test Coverage' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          sed -n '/Coverage report/,/^$/p' test-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '## Test Results' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E '(Test Files|Tests|Start at|Duration)' test-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
