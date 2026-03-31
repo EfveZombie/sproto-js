@@ -46,6 +46,7 @@ local person_data_schema_text = [[
     double 4 : double
     doubles 5 : *double
     fpn 6 : integer(2)
+    bin 7 : binary
 }
 ]]
 

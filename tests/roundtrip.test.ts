@@ -676,14 +676,15 @@ describe('roundtrip - fixed-point decimal with bigint', () => {
     expect(decoded!.fpn).toBeCloseTo(3.14, 2);
   });
 
-  // [BUG] sproto.ts ~L1794: when decodeIntegerAs="bigint" and field has decimal (extra),
-  // BigInt() is called on a float which throws RangeError
-  it('should throw when decoding fixed-point as bigint', () => {
+  // 上游已修复：decodeIntegerAs="bigint" 时，fixed-point 字段（有 decimal）仍正常解码为 number
+  it('should decode fixed-point as number even when decodeIntegerAs="bigint"', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', { fpn: 1.5 });
-    expect(() => {
-      sp.decode('Data', encoded!, { decodeIntegerAs: 'bigint' });
-    }).toThrow();
+    expect(encoded).not.toBeNull();
+    const decoded = sp.decode('Data', encoded!, { decodeIntegerAs: 'bigint' });
+    expect(decoded).not.toBeNull();
+    expect(typeof decoded!.fpn).toBe('number');
+    expect(decoded!.fpn as number).toBeCloseTo(1.5, 2);
   });
 });
 

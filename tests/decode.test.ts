@@ -400,16 +400,16 @@ describe('decode - integer array with bigint', () => {
 });
 
 describe('decode - fixed-point integer with bigint', () => {
-  it('should throw RangeError when decodeIntegerAs="bigint" with decimal field', () => {
+  it('should decode fixed-point field as number even when decodeIntegerAs="bigint"', () => {
     const sp = loadPersonDataSproto();
     const encoded = sp.encode('Data', { fpn: 1.82 });
     expect(encoded).not.toBeNull();
 
-    // [BUG] sproto.ts ~L1776: 当 decodeIntegerAs="bigint" 且字段有 decimal 时会抛出 RangeError
-    // 因为 decodeFixedPoint 调用 decodeIntegerAs 选项，但 decimal 除法需要 number 类型
-    expect(() => {
-      sp.decode('Data', encoded!, { decodeIntegerAs: 'bigint' });
-    }).toThrow(RangeError);
+    // 上游已修复：decodeIntegerAs="bigint" 时，fixed-point 字段（有 decimal）仍正常解码为 number
+    const decoded = sp.decode('Data', encoded!, { decodeIntegerAs: 'bigint' });
+    expect(decoded).not.toBeNull();
+    expect(typeof decoded!.fpn).toBe('number');
+    expect(decoded!.fpn as number).toBeCloseTo(1.82, 2);
   });
 });
 
