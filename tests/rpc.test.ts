@@ -402,3 +402,287 @@ describe('RPC - real protocol bundle (protocol.spb)', () => {
     expect(ret.responseFunc).toBeUndefined();
   });
 });
+
+// ============================================================================
+// Additional Coverage: RPC error paths and edge cases
+// ============================================================================
+describe('RPC - error paths', () => {
+  it('should throw when attaching with non-existent protocol name', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+    expect(() => {
+      request('nonexistent_protocol', { data: 'test' }, 1);
+    }).toThrow('Protocol not found');
+  });
+
+  it('should throw when passing args to protocol with no request type (foo)', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+    // foo protocol has no request type, passing args should throw
+    expect(() => {
+      request('foo', { what: 'should fail' }, 1);
+    }).toThrow('Request not found');
+  });
+});
+
+// ============================================================================
+// Additional Coverage: session storage (response vs true)
+// ============================================================================
+describe('RPC - session storage behavior', () => {
+  it('should store response type for protocol with response (foobar)', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    // foobar has response type → session stores response object
+    const session = 100;
+    const req = request('foobar', { what: 'test' }, session);
+    const result = host.dispatch(req);
+    expect(result.type).toBe('REQUEST');
+
+    // Send response and verify it decodes correctly
+    const resp = result.responseFunc!({ ok: true });
+    const respResult = host.dispatch(resp);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.result).toBeDefined();
+    expect(respResult.result!.ok).toBe(true);
+  });
+
+  it('should store true for protocol with nil response (bar) and dispatch returns undefined result', () => {
+    const sp = loadRpcSproto();
+    const senderHost = sp.host('package');
+    const senderRequest = senderHost.attach(sp);
+
+    const receiverHost = sp.host('package');
+    receiverHost.attach(sp);
+
+    // bar has response=nil → session stores true
+    const session = 200;
+    const reqData = senderRequest('bar', null as any, session);
+
+    const dispatchResult = receiverHost.dispatch(reqData);
+    expect(dispatchResult.type).toBe('REQUEST');
+    expect(dispatchResult.pname).toBe('bar');
+
+    // Send confirm response
+    const respData = dispatchResult.responseFunc!({});
+
+    // Dispatch response - response === true means no response body
+    const respResult = senderHost.dispatch(respData);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.session).toBe(session);
+    // When response === true (no response type), result should be undefined
+    expect(respResult.result).toBeUndefined();
+  });
+
+  it('should not store session for request without session parameter (blackhole)', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    // blackhole has no request and no response, send without session
+    const req = request('blackhole', null as any);
+    const result = host.dispatch(req);
+    expect(result.type).toBe('REQUEST');
+    expect(result.pname).toBe('blackhole');
+    expect(result.responseFunc).toBeUndefined();
+    expect(result.session).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Additional Coverage: dispatch with session=0 (no session request)
+// ============================================================================
+describe('RPC - dispatch with session edge cases', () => {
+  it('should handle request with session=0 as no-session request', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    // Session 0 should be treated as no session
+    const req = request('foobar', { what: 'session-zero' }, 0);
+    const result = host.dispatch(req);
+    expect(result.type).toBe('REQUEST');
+    expect(result.pname).toBe('foobar');
+    expect(result.result!.what).toBe('session-zero');
+    // session=0 means no response expected
+    expect(result.responseFunc).toBeUndefined();
+  });
+
+  it('should handle large session numbers', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    const session = 999999;
+    const req = request('foobar', { what: 'large-session' }, session);
+    const result = host.dispatch(req);
+    expect(result.type).toBe('REQUEST');
+    expect(result.session).toBe(session);
+
+    const resp = result.responseFunc!({ ok: true });
+    const respResult = host.dispatch(resp);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.session).toBe(session);
+  });
+});
+
+// ============================================================================
+// Additional Coverage: confirm-only response dispatch on same host
+// Covers L2069-2070 (session stores true) and L2143-2147 (response === true)
+// ============================================================================
+describe('RPC - confirm-only response dispatch on same host', () => {
+  it('should dispatch confirm-only response on the same host that sent the request', () => {
+    const sp = loadRpcSproto();
+    const hostA = sp.host('package');
+    const hostB = sp.host('package');
+
+    const requestA = hostA.attach(sp);
+    hostB.attach(sp);
+
+    // bar protocol has response=nil → session stores true in hostA
+    const session = 500;
+    const reqData = requestA('bar', null as any, session);
+
+    // hostB dispatches the request and gets responseFunc
+    const dispatchResult = hostB.dispatch(reqData);
+    expect(dispatchResult.type).toBe('REQUEST');
+    expect(dispatchResult.pname).toBe('bar');
+    expect(dispatchResult.responseFunc).toBeDefined();
+
+    // Generate response data
+    const respData = dispatchResult.responseFunc!({});
+
+    // hostA dispatches the response → walks response === true branch
+    const respResult = hostA.dispatch(respData);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.session).toBe(session);
+    // When response === true (no response type), result should be undefined
+    expect(respResult.result).toBeUndefined();
+  });
+
+  it('should dispatch confirm-only response for foobar (response !== true) on same host', () => {
+    const sp = loadRpcSproto();
+    const hostA = sp.host('package');
+    const hostB = sp.host('package');
+
+    const requestA = hostA.attach(sp);
+    hostB.attach(sp);
+
+    // foobar has response type → session stores response object (not true)
+    const session = 501;
+    const reqData = requestA('foobar', { what: 'test' }, session);
+
+    const dispatchResult = hostB.dispatch(reqData);
+    expect(dispatchResult.type).toBe('REQUEST');
+
+    const respData = dispatchResult.responseFunc!({ ok: true });
+
+    // hostA dispatches the response → walks response !== true branch
+    const respResult = hostA.dispatch(respData);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.session).toBe(session);
+    expect(respResult.result).toBeDefined();
+    expect(respResult.result!.ok).toBe(true);
+  });
+});
+
+// ============================================================================
+// Additional Coverage: foo protocol attach without request type
+// Covers L2058-2059 (proto.request is null, skip encoding args)
+// ============================================================================
+describe('RPC - foo protocol attach without request type', () => {
+  it('should send foo request without args (no request type)', () => {
+    const sp = loadRpcSproto();
+    const hostA = sp.host('package');
+    const hostB = sp.host('package');
+
+    const requestA = hostA.attach(sp);
+    hostB.attach(sp);
+
+    const session = 600;
+    // foo has no request type, pass null as args
+    const reqData = requestA('foo', null as any, session);
+
+    const result = hostB.dispatch(reqData);
+    expect(result.type).toBe('REQUEST');
+    expect(result.pname).toBe('foo');
+    // No request type means result is undefined
+    expect(result.result).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Additional Coverage: bar confirm-only response dispatched on sender host
+// Covers L2069-2070 (session stores true when proto.response is falsy)
+// Covers L2114-2115 (response === true returns RESPONSE without result)
+// ============================================================================
+describe('RPC - bar confirm-only response on same host (L2069-2070, L2114-2115)', () => {
+  it('should dispatch bar confirm response on sender host and get RESPONSE without result', () => {
+    const sp = loadRpcSproto();
+
+    // Use a single sender host that both sends and receives
+    const senderHost = sp.host('package');
+    const senderRequest = senderHost.attach(sp);
+
+    // Separate receiver host to dispatch the request and generate response
+    const receiverHost = sp.host('package');
+    receiverHost.attach(sp);
+
+    const session = 700;
+    // bar protocol: no request type, response=nil (confirm-only)
+    // L2069-2070: proto.response is falsy → session[700] = true
+    const reqData = senderRequest('bar', null as any, session);
+
+    // Receiver dispatches the request
+    const dispatchResult = receiverHost.dispatch(reqData);
+    expect(dispatchResult.type).toBe('REQUEST');
+    expect(dispatchResult.pname).toBe('bar');
+    expect(dispatchResult.responseFunc).toBeDefined();
+
+    // Receiver generates confirm response (no body)
+    const respData = dispatchResult.responseFunc!({});
+
+    // L2114-2115: sender dispatches the response on its own host
+    // session[700] === true → returns { type: "RESPONSE", session: 700 } without result
+    const respResult = senderHost.dispatch(respData);
+    expect(respResult.type).toBe('RESPONSE');
+    expect(respResult.session).toBe(session);
+    expect(respResult.result).toBeUndefined();
+  });
+
+  it('should dispatch blackhole request without session (L2078-2079 else branch)', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    // blackhole: no request, no response; send without session
+    // L2078-2079: headerData.session is falsy → returns REQUEST without responseFunc
+    const reqData = request('blackhole', null as any);
+    const result = host.dispatch(reqData);
+
+    expect(result.type).toBe('REQUEST');
+    expect(result.pname).toBe('blackhole');
+    expect(result.responseFunc).toBeUndefined();
+    expect(result.session).toBeUndefined();
+  });
+
+  it('should dispatch foobar request with session=0 (falsy session, L2078-2079)', () => {
+    const sp = loadRpcSproto();
+    const host = sp.host('package');
+    const request = host.attach(sp);
+
+    // session=0 is falsy in JS → should hit L2078-2079 else branch
+    const reqData = request('foobar', { what: 'zero-session' }, 0);
+    const result = host.dispatch(reqData);
+
+    expect(result.type).toBe('REQUEST');
+    expect(result.pname).toBe('foobar');
+    expect(result.result).toBeDefined();
+    expect(result.result!.what).toBe('zero-session');
+    // session=0 is falsy, so no responseFunc
+    expect(result.responseFunc).toBeUndefined();
+  });
+});
