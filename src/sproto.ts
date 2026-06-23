@@ -128,7 +128,7 @@ export interface SprotoInstance {
 export interface SprotoAPI {
   pack: (inbuf: number[]) => number[];
   unpack: (inbuf: number[]) => number[];
-  createNew: (binsch: number[]) => SprotoInstance | null;
+  createNew: (binsch: Uint8Array) => SprotoInstance | null;
 }
 
 const sproto = (() => {
@@ -176,13 +176,14 @@ const sproto = (() => {
 
     uint64Rshift: (num: number, offset: number): number => Math.floor(num / Math.pow(2, offset)),
 
-    toWord: (stream: number[]): number => (stream[0] & 0xff) | ((stream[1] & 0xff) << 8),
+    toWord: (stream: ArrayLike<number>, offset: number = 0): number =>
+      (stream[offset] & 0xff) | ((stream[offset + 1] & 0xff) << 8),
 
-    toDword: (stream: number[]): number => (
-      (stream[0] & 0xff) |
-      ((stream[1] & 0xff) << 8) |
-      ((stream[2] & 0xff) << 16) |
-      ((stream[3] & 0xff) << 24)
+    toDword: (stream: ArrayLike<number>, offset: number = 0): number => (
+      (stream[offset] & 0xff) |
+      ((stream[offset + 1] & 0xff) << 8) |
+      ((stream[offset + 2] & 0xff) << 16) |
+      ((stream[offset + 3] & 0xff) << 24)
     ) >>> 0,
 
     string2utf8: (str: string): number[] => {
@@ -265,10 +266,10 @@ const sproto = (() => {
     return Math.pow(base, exp);
   }
 
-  const countArray = (stream: number[]): number => {
+  const countArray = (stream: Uint8Array): number => {
     const length = utils.toDword(stream);
     let n = 0;
-    let currentStream = stream.slice(CONSTANTS.SIZEOF_LENGTH);
+    let offset = CONSTANTS.SIZEOF_LENGTH;
     let remainingLength = length;
 
     while (remainingLength > 0) {
@@ -276,20 +277,20 @@ const sproto = (() => {
         return -1;
       }
 
-      const nsz = utils.toDword(currentStream) + CONSTANTS.SIZEOF_LENGTH;
+      const nsz = utils.toDword(stream, offset) + CONSTANTS.SIZEOF_LENGTH;
       if (nsz > remainingLength) {
         return -1;
       }
 
       n++;
-      currentStream = currentStream.slice(nsz);
+      offset += nsz;
       remainingLength -= nsz;
     }
 
     return n;
   };
 
-  const structField = (stream: number[], sz: number): number => {
+  const structField = (stream: Uint8Array, sz: number): number => {
     if (sz < CONSTANTS.SIZEOF_LENGTH) {
       return -1;
     }
@@ -301,12 +302,11 @@ const sproto = (() => {
       return -1;
     }
 
-    const field = stream.slice(CONSTANTS.SIZEOF_HEADER);
     let remainingSz = sz - header;
-    let currentStream = stream.slice(header);
+    let offset = header;
 
     for (let i = 0; i < fn; i++) {
-      const value = utils.toWord(field.slice(i * CONSTANTS.SIZEOF_FIELD));
+      const value = utils.toWord(stream, CONSTANTS.SIZEOF_HEADER + i * CONSTANTS.SIZEOF_FIELD);
 
       if (value !== 0) {
         continue;
@@ -316,26 +316,26 @@ const sproto = (() => {
         return -1;
       }
 
-      const dsz = utils.toDword(currentStream);
+      const dsz = utils.toDword(stream, offset);
       if (remainingSz < CONSTANTS.SIZEOF_LENGTH + dsz) {
         return -1;
       }
 
-      currentStream = currentStream.slice(CONSTANTS.SIZEOF_LENGTH + dsz);
+      offset += CONSTANTS.SIZEOF_LENGTH + dsz;
       remainingSz -= CONSTANTS.SIZEOF_LENGTH + dsz;
     }
 
     return fn;
   };
 
-  const importString = (s: SprotoInstance, stream: number[]): string => {
-    const sz = utils.toDword(stream);
-    const arr = stream.slice(CONSTANTS.SIZEOF_LENGTH, CONSTANTS.SIZEOF_LENGTH + sz);
-    return String.fromCharCode(...arr);
+  const importString = (stream: Uint8Array, offset: number): string => {
+    const sz = utils.toDword(stream, offset);
+    const start = offset + CONSTANTS.SIZEOF_LENGTH;
+    return String.fromCharCode(...stream.subarray(start, start + sz));
   };
 
-  function importField(s: SprotoInstance, f: SprotoField, stream: number[]): number[] | null {
-    let sz: number, result: number[], fn: number;
+  function importField(s: SprotoInstance, f: SprotoField, stream: Uint8Array, offset: number): number | null {
+    let sz: number, fn: number;
     let array = 0;
     let tag = -1;
     f.tag = -1;
@@ -346,17 +346,18 @@ const sproto = (() => {
     f.map = -1;
     f.extra = 0;
 
-    sz = utils.toDword(stream);
-    stream = stream.slice(CONSTANTS.SIZEOF_LENGTH);
-    result = stream.slice(sz);
-    fn = structField(stream, sz);
+    sz = utils.toDword(stream, offset);
+    const fieldOffset = offset + CONSTANTS.SIZEOF_LENGTH;
+    const resultOffset = offset + CONSTANTS.SIZEOF_LENGTH + sz;
+    const fieldView = stream.subarray(fieldOffset, fieldOffset + sz);
+    fn = structField(fieldView, sz);
     if (fn < 0) return null;
 
-    stream = stream.slice(CONSTANTS.SIZEOF_HEADER);
+    const fieldDataOffset = CONSTANTS.SIZEOF_HEADER;
     for (let i = 0; i < fn; i++) {
       let value: number;
       ++tag;
-      value = utils.toWord(stream.slice(CONSTANTS.SIZEOF_FIELD * i));
+      value = utils.toWord(fieldView, fieldDataOffset + CONSTANTS.SIZEOF_FIELD * i);
       if ((value & 1) !== 0) {
         tag += Math.floor(value / 2);
         continue;
@@ -364,7 +365,7 @@ const sproto = (() => {
 
       if (tag === 0) {
         if (value !== 0) return null;
-        f.name = importString(s, stream.slice(fn * CONSTANTS.SIZEOF_FIELD));
+        f.name = importString(fieldView, fieldDataOffset + fn * CONSTANTS.SIZEOF_FIELD);
         continue;
       }
 
@@ -419,21 +420,22 @@ const sproto = (() => {
       return null;
     }
     f.type |= array;
-    return result;
+    return resultOffset;
   }
 
-  function importType(s: SprotoInstance, t: SprotoType, stream: number[]): number[] | null {
-    let result: number[], fn: number, n: number, maxn: number, last: number;
-    const sz = utils.toDword(stream);
-    stream = stream.slice(CONSTANTS.SIZEOF_LENGTH);
-    result = stream.slice(sz);
-    fn = structField(stream, sz);
+  function importType(s: SprotoInstance, t: SprotoType, stream: Uint8Array, offset: number): number | null {
+    let fn: number, n: number, maxn: number, last: number;
+    const sz = utils.toDword(stream, offset);
+    const fieldOffset = offset + CONSTANTS.SIZEOF_LENGTH;
+    const resultOffset = offset + CONSTANTS.SIZEOF_LENGTH + sz;
+    const fieldView = stream.subarray(fieldOffset, fieldOffset + sz);
+    fn = structField(fieldView, sz);
     if (fn <= 0 || fn > 2) {
       return null;
     }
 
     for (let i = 0; i < fn * CONSTANTS.SIZEOF_FIELD; i += CONSTANTS.SIZEOF_FIELD) {
-      const v = utils.toWord(stream.slice(CONSTANTS.SIZEOF_HEADER + i));
+      const v = utils.toWord(fieldView, CONSTANTS.SIZEOF_HEADER + i);
       if (v !== 0) return null;
     }
 
@@ -442,20 +444,20 @@ const sproto = (() => {
     t.base = 0;
     t.maxn = 0;
     t.f = null;
-    stream = stream.slice(CONSTANTS.SIZEOF_HEADER + fn * CONSTANTS.SIZEOF_FIELD);
-    t.name = importString(s, stream);
+    const nameOffset = CONSTANTS.SIZEOF_HEADER + fn * CONSTANTS.SIZEOF_FIELD;
+    t.name = importString(fieldView, nameOffset);
 
     if (fn === 1) {
-      return result;
+      return resultOffset;
     }
 
-    stream = stream.slice(utils.toDword(stream) + CONSTANTS.SIZEOF_LENGTH);
-    n = countArray(stream);
+    let fieldDataOffset = nameOffset + utils.toDword(fieldView, nameOffset) + CONSTANTS.SIZEOF_LENGTH;
+    n = countArray(fieldView.subarray(fieldDataOffset));
     if (n < 0) {
       return null;
     }
 
-    stream = stream.slice(CONSTANTS.SIZEOF_LENGTH);
+    fieldDataOffset += CONSTANTS.SIZEOF_LENGTH;
     maxn = n;
     last = -1;
     t.n = n;
@@ -464,11 +466,11 @@ const sproto = (() => {
       let tag: number;
       t.f[i] = {} as SprotoField;
       const f = t.f[i];
-      const newStream = importField(s, f, stream);
-      if (newStream === null) {
+      const newOffset = importField(s, f, fieldView, fieldDataOffset);
+      if (newOffset === null) {
         return null;
       }
-      stream = newStream;
+      fieldDataOffset = newOffset;
 
       tag = f.tag;
       if (tag <= last) {
@@ -485,16 +487,17 @@ const sproto = (() => {
     if (n !== t.n) {
       t.base = -1;
     }
-    return result;
+    return resultOffset;
   }
 
-  function importProtocol(s: SprotoInstance, p: SprotoProtocol, stream: number[]): number[] | null {
-    let result: number[], sz: number, fn: number, tag: number;
-    sz = utils.toDword(stream);
-    stream = stream.slice(CONSTANTS.SIZEOF_LENGTH);
-    result = stream.slice(sz);
-    fn = structField(stream, sz);
-    stream = stream.slice(CONSTANTS.SIZEOF_HEADER);
+  function importProtocol(s: SprotoInstance, p: SprotoProtocol, stream: Uint8Array, offset: number): number | null {
+    let sz: number, fn: number, tag: number;
+    sz = utils.toDword(stream, offset);
+    const fieldOffset = offset + CONSTANTS.SIZEOF_LENGTH;
+    const resultOffset = offset + CONSTANTS.SIZEOF_LENGTH + sz;
+    const fieldView = stream.subarray(fieldOffset, fieldOffset + sz);
+    fn = structField(fieldView, sz);
+    const fieldDataOffset = CONSTANTS.SIZEOF_HEADER;
     p.name = null;
     p.tag = -1;
     p.p = [];
@@ -503,7 +506,7 @@ const sproto = (() => {
     p.confirm = 0;
     tag = 0;
     for (let i = 0; i < fn; i++, tag++) {
-      let value = utils.toWord(stream.slice(CONSTANTS.SIZEOF_FIELD * i));
+      let value = utils.toWord(fieldView, fieldDataOffset + CONSTANTS.SIZEOF_FIELD * i);
       if ((value & 1) !== 0) {
         tag += Math.floor(value - 1) / 2;
         continue;
@@ -514,7 +517,7 @@ const sproto = (() => {
           if (value !== -1) {
             return null;
           }
-          p.name = importString(s, stream.slice(CONSTANTS.SIZEOF_FIELD * fn));
+          p.name = importString(fieldView, fieldDataOffset + CONSTANTS.SIZEOF_FIELD * fn);
           break;
         case 1:
           if (value < 0) {
@@ -543,59 +546,60 @@ const sproto = (() => {
     if (p.name === null || p.tag < 0) {
       return null;
     }
-    return result;
+    return resultOffset;
   }
 
-  function createFromBundle(s: SprotoInstance, stream: number[], sz: number): SprotoInstance | null {
-    let content: number[], typedata: number[], protocoldata: number[];
+  function createFromBundle(s: SprotoInstance, stream: Uint8Array, sz: number): SprotoInstance | null {
+    // 使用 subarray 而非 slice，避免 schema 解析过程中重复拷贝 Uint8Array
+    let typeOffset: number = 0, protocolOffset: number = 0;
     const fn = structField(stream, sz);
     if (fn < 0 || fn > 2)
       return null;
-    stream = stream.slice(CONSTANTS.SIZEOF_HEADER);
-    content = stream.slice(fn * CONSTANTS.SIZEOF_FIELD);
+    const headerOffset = CONSTANTS.SIZEOF_HEADER;
+    let contentOffset = headerOffset + fn * CONSTANTS.SIZEOF_FIELD;
 
     for (let i = 0; i < fn; i++) {
-      const value = utils.toWord(stream.slice(i * CONSTANTS.SIZEOF_FIELD));
+      const value = utils.toWord(stream, headerOffset + i * CONSTANTS.SIZEOF_FIELD);
       if (value !== 0) {
         return null;
       }
 
-      const n = countArray(content);
+      const n = countArray(stream.subarray(contentOffset));
       if (n < 0) {
         return null;
       }
 
       if (i === 0) {
-        typedata = content.slice(CONSTANTS.SIZEOF_LENGTH);
+        typeOffset = contentOffset + CONSTANTS.SIZEOF_LENGTH;
         s.type_n = n;
         s.type = [];
       } else {
-        protocoldata = content.slice(CONSTANTS.SIZEOF_LENGTH);
+        protocolOffset = contentOffset + CONSTANTS.SIZEOF_LENGTH;
         s.protocol_n = n;
         s.proto = [];
       }
-      content = content.slice(utils.toDword(content) + CONSTANTS.SIZEOF_LENGTH);
+      contentOffset += utils.toDword(stream, contentOffset) + CONSTANTS.SIZEOF_LENGTH;
     }
 
     for (let i = 0; i < s.type_n; i++) {
       if (s.type) {
         s.type[i] = {} as SprotoType;
-        const newTypedata = importType(s, s.type[i], typedata!);
-        if (newTypedata === null) {
+        const newOffset = importType(s, s.type[i], stream, typeOffset);
+        if (newOffset === null) {
           return null;
         }
-        typedata = newTypedata;
+        typeOffset = newOffset;
       }
     }
 
     for (let i = 0; i < s.protocol_n; i++) {
       if (s.proto) {
         s.proto[i] = {} as SprotoProtocol;
-        const newProtocoldata = importProtocol(s, s.proto[i], protocoldata!);
-        if (newProtocoldata === null) {
+        const newOffset = importProtocol(s, s.proto[i], stream, protocolOffset);
+        if (newOffset === null) {
           return null;
         }
-        protocoldata = newProtocoldata;
+        protocolOffset = newOffset;
       }
     }
 
@@ -1304,7 +1308,7 @@ const sproto = (() => {
     return buffer;
   };
 
-  api.createNew = (binsch: number[]): SprotoInstance | null => {
+  api.createNew = (binsch: Uint8Array): SprotoInstance | null => {
     const s: Partial<SprotoInstance> = {};
     let enbuffer: number[];
     s.type_n = 0;
